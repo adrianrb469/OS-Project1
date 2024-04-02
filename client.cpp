@@ -7,10 +7,12 @@
 #include "chat.pb.h"
 #include <thread>
 #include <sstream>
+#include <atomic>
 
 bool wait = false;                 // Indicates if the client is waiting for a response from the server.
 std::string userStatus = "ACTIVO"; // The status of the user.
 
+std::atomic<bool> shouldExit(false);
 /**
  * Connects to the server.
  *
@@ -123,7 +125,7 @@ bool registerUser(int clientSocket, const std::string &username)
  */
 void receiveMessages(int clientSocket)
 {
-    while (true)
+    while (!shouldExit)
     {
         char buffer[1024];
         ssize_t bytesRead = recv(clientSocket, buffer, sizeof(buffer), 0);
@@ -141,8 +143,7 @@ void receiveMessages(int clientSocket)
                 int responseCode = response.code();
                 if (responseCode == 200)
                 {
-                    std::cout << std::endl
-                              << "[------------- Respuesta: OK (200) " << response.servermessage() << "-------------------] " << std::endl;
+                    std::cout << "OK (200) " << response.servermessage() << std::endl;
 
                     switch (response.option())
                     {
@@ -257,31 +258,6 @@ void receiveMessages(int clientSocket)
     }
 }
 
-void showHelp()
-{
-    std::cout << "< -------------- Ayuda -------------- >" << std::endl;
-    std::cout << "1. Desplegar usuarios conectados: Muestra la lista de usuarios conectados." << std::endl;
-    std::cout << "2. Buscar usuario: Busca un usuario por su nombre." << std::endl;
-    std::cout << "3. Mensaje Grupal: Envía un mensaje a todos los usuarios conectados." << std::endl;
-    std::cout << "4. Mensaje directo: Envía un mensaje privado a un usuario." << std::endl;
-    std::cout << "5. Estado: Cambia el estado del usuario." << std::endl;
-    std::cout << "6. Ayuda: Muestra este menú de ayuda." << std::endl;
-    std::cout << "7. Salir: Cierra la sesión y termina el programa." << std::endl;
-}
-
-void showMenu(const std::string &username)
-{
-    std::cout << "< -------------- Menu -------------- >" << std::endl;
-    std::cout << "usuario: " << username << " - estado: " << userStatus << std::endl;
-    std::cout << "1. Desplegar usuarios conectados" << std::endl;
-    std::cout << "2. Buscar usuario" << std::endl;
-    std::cout << "3. Mensaje Grupal " << std::endl;
-    std::cout << "4. Mensaje directo" << std::endl;
-    std::cout << "5. Estado" << std::endl;
-    std::cout << "6. Ayuda" << std::endl;
-    std::cout << "7. Salir" << std::endl;
-}
-
 void close_socket(int socket_fd)
 {
     if (socket_fd != -1)
@@ -290,6 +266,138 @@ void close_socket(int socket_fd)
         {
             // Handle error here
             perror("Error closing socket");
+        }
+    }
+}
+
+void showHelp()
+{
+    std::cout << "Comandos disponibles:" << std::endl;
+    std::cout << "- /usuarios: Despliega los usuarios conectados." << std::endl;
+    std::cout << "- /buscar <usuario>: Busca un usuario por su nombre." << std::endl;
+    std::cout << "- /mensaje <mensaje>: Envía un mensaje a todos los usuarios conectados." << std::endl;
+    std::cout << "- /privado <usuario> <mensaje>: Envía un mensaje privado a un usuario." << std::endl;
+    std::cout << "- /estado <estado>: Cambia el estado del usuario (ACTIVO, OCUPADO, INACTIVO)." << std::endl;
+    std::cout << "- /ayuda: Muestra este menú de ayuda." << std::endl;
+    std::cout << "- /salir: Cierra la sesión y termina el programa." << std::endl;
+}
+
+void handleUserInput(int clientSocket, const std::string &username)
+{
+    std::string input;
+    while (true)
+    {
+        std::cout << "> ";
+        std::getline(std::cin, input);
+
+        if (input.empty())
+        {
+            continue;
+        }
+
+        if (input == "/usuarios")
+        {
+            chat::ClientPetition connectedUsersPetition;
+            connectedUsersPetition.set_option(2);
+            chat::UserRequest *userRequest = connectedUsersPetition.mutable_users();
+            userRequest->set_user("everyone");
+
+            std::string serializedConnectedUsersMessage;
+            connectedUsersPetition.SerializeToString(&serializedConnectedUsersMessage);
+
+            send(clientSocket, serializedConnectedUsersMessage.c_str(), serializedConnectedUsersMessage.length(), 0);
+        }
+        else if (input.substr(0, 8) == "/buscar ")
+        {
+            std::string userToSearch = input.substr(8);
+
+            chat::ClientPetition searchUserPetition;
+            searchUserPetition.set_option(5);
+            chat::UserRequest *userRequest = searchUserPetition.mutable_users();
+            userRequest->set_user(userToSearch);
+
+            std::string serializedSearchUserMessage;
+            searchUserPetition.SerializeToString(&serializedSearchUserMessage);
+
+            send(clientSocket, serializedSearchUserMessage.c_str(), serializedSearchUserMessage.length(), 0);
+        }
+        else if (input.substr(0, 9) == "/mensaje ")
+        {
+            std::string message = input.substr(9);
+
+            chat::ClientPetition messagePetition;
+            messagePetition.set_option(4);
+            chat::MessageCommunication *messageComm = messagePetition.mutable_messagecommunication();
+
+            messageComm->set_recipient("everyone");
+            messageComm->set_message(message);
+            messageComm->set_sender(username);
+
+            std::string serializedMessagePetition;
+            messagePetition.SerializeToString(&serializedMessagePetition);
+
+            send(clientSocket, serializedMessagePetition.c_str(), serializedMessagePetition.length(), 0);
+        }
+        else if (input.substr(0, 9) == "/privado ")
+        {
+            std::istringstream iss(input.substr(9));
+            std::string recipient, message;
+            if (iss >> recipient)
+            {
+                std::getline(iss, message);
+
+                chat::ClientPetition messagePetition;
+                messagePetition.set_option(4);
+                chat::MessageCommunication *messageComm = messagePetition.mutable_messagecommunication();
+
+                messageComm->set_recipient(recipient);
+                messageComm->set_message(message);
+                messageComm->set_sender(username);
+
+                std::string serializedMessagePetition;
+                messagePetition.SerializeToString(&serializedMessagePetition);
+
+                send(clientSocket, serializedMessagePetition.c_str(), serializedMessagePetition.length(), 0);
+            }
+            else
+            {
+                std::cout << "Formato inválido. Uso: /privado <usuario> <mensaje>" << std::endl;
+            }
+        }
+        else if (input.substr(0, 8) == "/estado ")
+        {
+            std::string status = input.substr(8);
+
+            if (status != "ACTIVO" && status != "OCUPADO" && status != "INACTIVO")
+            {
+                std::cout << "Estado inválido. Los estados válidos son: ACTIVO, OCUPADO, INACTIVO." << std::endl;
+                continue;
+            }
+
+            chat::ClientPetition statusChangePetition;
+            statusChangePetition.set_option(3);
+            chat::ChangeStatus *changeStatus = statusChangePetition.mutable_change();
+            changeStatus->set_username(username);
+            changeStatus->set_status(status);
+
+            std::string serializedStatusChange;
+            statusChangePetition.SerializeToString(&serializedStatusChange);
+
+            send(clientSocket, serializedStatusChange.c_str(), serializedStatusChange.length(), 0);
+        }
+        else if (input == "/ayuda")
+        {
+            showHelp();
+        }
+        else if (input == "/salir")
+        {
+            std::cout << "Cerrando sesión..." << std::endl;
+            shouldExit = true;
+            break;
+        }
+        else
+        {
+            std::cout << "Comando inválido. Ingrese /ayuda para ver los comandos disponibles." << std::endl;
         }
     }
 }
@@ -322,162 +430,11 @@ int main(int argc, char *argv[])
 
     std::thread receiveThread(receiveMessages, clientSocket);
 
-    while (true)
-    {
-        if (!wait)
-        {
+    handleUserInput(clientSocket, username);
 
-            showMenu(username);
-            int option;
-            std::cin >> option;
-
-            switch (option)
-            {
-            case 1:
-            {
-                chat::ClientPetition connectedUsersPetition;
-                connectedUsersPetition.set_option(2);
-                chat::UserRequest *userRequest = connectedUsersPetition.mutable_users();
-                userRequest->set_user("everyone");
-
-                std::string serializedConnectedUsersMessage;
-                connectedUsersPetition.SerializeToString(&serializedConnectedUsersMessage);
-
-                send(clientSocket, serializedConnectedUsersMessage.c_str(), serializedConnectedUsersMessage.length(), 0);
-                wait = true;
-                break;
-            }
-            case 2:
-            {
-                std::string userToSearch;
-                std::cout << "usuario: ";
-                std::cin >> userToSearch;
-
-                chat::ClientPetition searchUserPetition;
-                searchUserPetition.set_option(5);
-                chat::UserRequest *userRequest = searchUserPetition.mutable_users();
-                userRequest->set_user(userToSearch);
-
-                std::string serializedSearchUserMessage;
-                searchUserPetition.SerializeToString(&serializedSearchUserMessage);
-
-                send(clientSocket, serializedSearchUserMessage.c_str(), serializedSearchUserMessage.length(), 0);
-                wait = true;
-                break;
-            }
-            case 3:
-            {
-                std::string message;
-                std::cout << "mensaje: ";
-                std::cin.ignore();
-                std::getline(std::cin, message);
-
-                chat::ClientPetition messagePetition;
-                messagePetition.set_option(4);
-                chat::MessageCommunication *messageComm = messagePetition.mutable_messagecommunication();
-
-                messageComm->set_recipient("everyone");
-                messageComm->set_message(message);
-                messageComm->set_sender(username);
-
-                std::string serializedMessagePetition;
-                messagePetition.SerializeToString(&serializedMessagePetition);
-
-                send(clientSocket, serializedMessagePetition.c_str(), serializedMessagePetition.length(), 0);
-                wait = true;
-                break;
-            }
-            case 4:
-            {
-                std::string input;
-                std::cout << "<usuario> <mensaje> ";
-                std::cin.ignore();
-                std::getline(std::cin, input);
-
-                std::istringstream iss(input);
-                std::string recipient, message;
-
-                iss >> recipient;
-
-                std::getline(iss, message);
-
-                chat::ClientPetition messagePetition;
-                messagePetition.set_option(4);
-                chat::MessageCommunication *messageComm = messagePetition.mutable_messagecommunication();
-
-                messageComm->set_recipient(recipient);
-                messageComm->set_message(message);
-                messageComm->set_sender(username);
-
-                std::string serializedMessagePetition;
-                messagePetition.SerializeToString(&serializedMessagePetition);
-
-                send(clientSocket, serializedMessagePetition.c_str(), serializedMessagePetition.length(), 0);
-                wait = true;
-                break;
-            }
-            case 5:
-            {
-                std::string status;
-                std::cout << "Ingrese su nuevo estado (ACTIVO=1, OCUPADO=2, INACTIVO=3): ";
-                std::cin >> status;
-
-                if (status != "1" && status != "2" && status != "3")
-                {
-                    std::cout << "Estado inválido" << std::endl;
-                    break;
-                }
-
-                switch (std::stoi(status))
-                {
-                case 1:
-                    status = "ACTIVO";
-                    break;
-                case 2:
-                    status = "OCUPADO";
-                    break;
-                case 3:
-                    status = "INACTIVO";
-                    break;
-                }
-
-                chat::ClientPetition statusChangePetition;
-                statusChangePetition.set_option(3);
-                chat::ChangeStatus *changeStatus = statusChangePetition.mutable_change();
-                changeStatus->set_username(username);
-                changeStatus->set_status(status);
-
-                std::string serializedStatusChange;
-                statusChangePetition.SerializeToString(&serializedStatusChange);
-
-                send(clientSocket, serializedStatusChange.c_str(), serializedStatusChange.length(), 0);
-                wait = true;
-                break;
-            }
-            case 6:
-            {
-                showHelp();
-                break;
-            }
-            case 7:
-            {
-                std::cout << "Cerrando sesión..." << std::endl;
-                close(clientSocket);
-                receiveThread.join();
-                return 0;
-            }
-            default:
-            {
-                std::cout << "Opción inválida" << std::endl;
-                std::cin.clear();
-                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                break;
-            }
-            }
-        }
-    }
-
-    close(clientSocket);
+    shouldExit = true;
     receiveThread.join();
+    close(clientSocket);
+
     return 0;
 }

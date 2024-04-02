@@ -25,36 +25,27 @@ std::thread timeoutThread([]()
                           {
     while (true) {
         auto now = std::chrono::system_clock::now();
-
         for (auto& client : connectedClients) {
-            if (client.status == "INACTIVO") continue;
-
+            if (client.status == "INACTIVO") {
+                continue;
+            }
             if (now - client.lastActionTime > TIMEOUT_PERIOD) {
                 std::cout << "Cliente inactivo." << std::endl;
                 client.status = "INACTIVO";
-
-                // Broadcast the status change to all connected clients
-                for (const auto &client : connectedClients)
-                {
-                    chat::ServerResponse response;
-                    response.set_option(3);
-                    response.set_code(200);
-                    chat::ChangeStatus *change = response.mutable_change();
-                    change->set_username(client.username);
-                    change->set_status("INACTIVO");
-
-                    std::string serializedResponse;
-                    response.SerializeToString(&serializedResponse);
-
-                    send(client.socket, serializedResponse.c_str(), serializedResponse.length(), 0);
-                }
-            } else {
-                std::cout << "Cliente activo." << std::endl;
-                client.status = "ACTIVO";
-            }
-
+                
+                // Send status change response to the specific client
+                chat::ServerResponse response;
+                response.set_option(3);
+                response.set_code(200);
+                chat::ChangeStatus *change = response.mutable_change();
+                change->set_username(client.username);
+                change->set_status("INACTIVO");
+                std::string serializedResponse;
+                response.SerializeToString(&serializedResponse);
+                send(client.socket, serializedResponse.c_str(), serializedResponse.length(), 0);
+                
+            } 
         }
-
         std::this_thread::sleep_for(std::chrono::seconds(5));
     } });
 
@@ -64,25 +55,13 @@ void markClientAsActive(int clientSocket)
     {
         if (client.socket == clientSocket)
         {
-            client.status = "ACTIVO";
-            client.lastActionTime = std::chrono::system_clock::now();
-            std::cout << "Marking client as active" << std::endl;
-            std::cout << "at: " << client.lastActionTime.time_since_epoch().count() << std::endl;
-
-            // Broadcast the status change to all connected clients
-            for (const auto &client : connectedClients)
+            if (client.status != "OCUPADO")
             {
-                chat::ServerResponse response;
-                response.set_option(3);
-                response.set_code(200);
-                chat::ChangeStatus *change = response.mutable_change();
-                change->set_username(client.username);
-                change->set_status("ACTIVO");
-
-                std::string serializedResponse;
-                response.SerializeToString(&serializedResponse);
-
-                send(client.socket, serializedResponse.c_str(), serializedResponse.length(), 0);
+                std::cout << "Usuario actual: " << client.username << std::endl;
+                std::cout << "Estado Previo: " << client.status << std::endl;
+                client.status = "ACTIVO";
+                client.lastActionTime = std::chrono::system_clock::now();
+                std::cout << "Estado Marcado:  " << client.status << std::endl;
             }
             break;
         }
@@ -116,10 +95,8 @@ void handleClientConnection(int clientSocket)
         if (petition.ParseFromString(receivedData))
         {
 
-            markClientAsActive(clientSocket);
-
-            std::cout << "Actualizando cliente como activo. " << std::endl;
-            std::cout << "t: " << it->lastActionTime.time_since_epoch().count() << std::endl;
+            // markClientAsActive(clientSocket);
+            client.lastActionTime = std::chrono::system_clock::now();
 
             switch (petition.option())
             {
@@ -222,29 +199,26 @@ void handleClientConnection(int clientSocket)
                 std::string username = changeStatus.username();
                 std::string status = changeStatus.status();
 
+                // Find the client that changed their status
                 for (auto &client : connectedClients)
                 {
                     if (client.username == username)
                     {
                         client.status = status;
+
+                        // Send the status change response to the specific client
+                        chat::ServerResponse response;
+                        response.set_option(3);
+                        response.set_code(200);
+                        chat::ChangeStatus *change = response.mutable_change();
+                        change->set_username(username);
+                        change->set_status(status);
+                        std::string serializedResponse;
+                        response.SerializeToString(&serializedResponse);
+                        send(client.socket, serializedResponse.c_str(), serializedResponse.length(), 0);
+
                         break;
                     }
-                }
-
-                // Broadcast the status change to all connected clients
-                for (const auto &client : connectedClients)
-                {
-                    chat::ServerResponse response;
-                    response.set_option(3);
-                    response.set_code(200);
-                    chat::ChangeStatus *change = response.mutable_change();
-                    change->set_username(username);
-                    change->set_status(status);
-
-                    std::string serializedResponse;
-                    response.SerializeToString(&serializedResponse);
-
-                    send(client.socket, serializedResponse.c_str(), serializedResponse.length(), 0);
                 }
 
                 break;
