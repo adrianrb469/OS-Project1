@@ -10,7 +10,8 @@
 #include <atomic>
 
 bool wait = false;                 // Indicates if the client is waiting for a response from the server.
-std::string userStatus = "ACTIVO"; // The status of the user.
+std::string userStatus = "ACTIVO"; // The status of the user
+std::string username = "";
 
 std::atomic<bool> shouldExit(false);
 /**
@@ -177,13 +178,8 @@ void receiveMessages(int clientSocket)
                             const chat::ChangeStatus &statusChangeResponse = response.change();
                             std::string username = statusChangeResponse.username();
                             std::string status = statusChangeResponse.status();
-
-                            if (username == userStatus) // server sends new status of any user, so we need to check if it's the user
-                            {
-                                userStatus = status;
-                            }
-
-                            std::cout << "Usuario: " << username << " - " << status << std::endl;
+                            userStatus = status;
+                            std::cout << "Cambio de estado de " << username << " a " << status << std::endl;
                         }
                         else
                         {
@@ -272,6 +268,8 @@ void close_socket(int socket_fd)
 
 void showHelp()
 {
+    std::cout << "Usuario: " << username << std::endl;
+    std::cout << "Estado: " << userStatus << std::endl;
     std::cout << "Comandos disponibles:" << std::endl;
     std::cout << "- /usuarios: Despliega los usuarios conectados." << std::endl;
     std::cout << "- /buscar <usuario>: Busca un usuario por su nombre." << std::endl;
@@ -284,8 +282,9 @@ void showHelp()
 
 void handleUserInput(int clientSocket, const std::string &username)
 {
+    bool shouldExit = false;
     std::string input;
-    while (true)
+    while (shouldExit == false)
     {
         std::cout << "> ";
         std::getline(std::cin, input);
@@ -412,7 +411,7 @@ int main(int argc, char *argv[])
 
     std::string serverIP = argv[1];
     int port = std::stoi(argv[2]);
-    std::string username = argv[3];
+    username = argv[3];
 
     int clientSocket = connectToServer(serverIP, port, username);
 
@@ -433,9 +432,8 @@ int main(int argc, char *argv[])
     std::cout << "Conectado al servidor. Ingrese /ayuda para ver los comandos disponibles." << std::endl;
 
     handleUserInput(clientSocket, username);
-
-    shouldExit = true;
-    receiveThread.join();
+    receiveThread.detach();
+    // receiveThread.join();
     close(clientSocket);
 
     return 0;
