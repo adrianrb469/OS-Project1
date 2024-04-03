@@ -430,6 +430,8 @@ int main(int argc, char *argv[])
 
     std::thread receiveThread(receiveMessages, clientSocket);
 
+    std::cout << "Conectado al servidor. Ingrese /ayuda para ver los comandos disponibles." << std::endl;
+
     handleUserInput(clientSocket, username);
 
     shouldExit = true;
