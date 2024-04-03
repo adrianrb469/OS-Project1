@@ -49,25 +49,6 @@ std::thread timeoutThread([]()
         std::this_thread::sleep_for(std::chrono::seconds(5));
     } });
 
-void markClientAsActive(int clientSocket)
-{
-    for (auto &client : connectedClients)
-    {
-        if (client.socket == clientSocket)
-        {
-            if (client.status != "OCUPADO")
-            {
-                std::cout << "Usuario actual: " << client.username << std::endl;
-                std::cout << "Estado Previo: " << client.status << std::endl;
-                client.status = "ACTIVO";
-                client.lastActionTime = std::chrono::system_clock::now();
-                std::cout << "Estado Marcado:  " << client.status << std::endl;
-            }
-            break;
-        }
-    }
-}
-
 void handleClientConnection(int clientSocket)
 {
     connectedClients.push_back({clientSocket,
@@ -95,8 +76,12 @@ void handleClientConnection(int clientSocket)
         if (petition.ParseFromString(receivedData))
         {
 
-            // markClientAsActive(clientSocket);
-            client.lastActionTime = std::chrono::system_clock::now();
+            it->lastActionTime = std::chrono::system_clock::now();
+
+            if (it->status == "INACTIVO")
+            {
+                it->status = "ACTIVO";
+            }
 
             switch (petition.option())
             {
